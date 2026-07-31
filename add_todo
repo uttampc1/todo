@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# Configuration: Adjust if your Flask server runs on a different host or port
+API_URL="http://localhost:8000/api/todos"
+
+usage() {
+    echo "Usage: ./add_todo.sh -m \"task description\" [options]"
+    echo "Options:"
+    echo "  -m \"task text\"   The description text (Required)"
+    echo "  -t \"tag text\"    Optional tag value"
+    echo "  -o \"owner name\"  Optional owner value"
+    echo "Example: ./add_todo.sh -m \"Buy groceries\" -t \"home\" -o \"Alice\""
+    exit 1
+}
+
+# Initialize variables
+TASK_VAL=""
+TAG_VAL=""
+OWNER_VAL=""
+HAS_TASK=false
+
+# Parse terminal option switches natively
+while getopts "m:t:o:" opt; do
+    case "$opt" in
+        m) TASK_VAL="$OPTARG"; HAS_TASK=true ;;
+        t) TAG_VAL="$OPTARG" ;;
+        o) OWNER_VAL="$OPTARG" ;;
+        *) usage ;;
+    esac
+done
+
+# Enforce that the core task description text must be supplied
+if [ "$HAS_TASK" = false ] || [ -z "$TASK_VAL" ]; then
+    echo "❌ Error: Missing required task description text flag (-m)."
+    usage
+fi
+
+# Build static JSON payload mapping keys cleanly
+JSON_PAYLOAD=$(cat <<EOF
+{
+  "task": "$TASK_VAL",
+  "tag": "$TAG_VAL",
+  "owner": "$OWNER_VAL"
+}
+EOF
+)
+
+# Send the POST request to the Flask server
+response=$(curl -s -X POST "$API_URL" \
+     -H "Content-Type: application/json" \
+     -d "$JSON_PAYLOAD")
+
+# Error handling: Check if curl could talk to the server or if the server threw a raw error
+if [ $? -ne 0 ] || [ -z "$response" ]; then
+    echo "❌ Error: Failed to connect to the Flask server at $API_URL."
+    exit 1
+fi
+
+# Look for an explicit error payload from our API
+
+if echo "$response" | grep -q '"error"'; then
+    echo "❌ Server Error: $(echo "$response" | grep -o '"error":"[^"]*' | cut -d'"' -f4)"
+    exit 1
+fi
+
+export TODO_CREATE_RESPONSE="$response"
+
+# Parse and print confirmation output using Python
+python3 <<EOF
+import os, json
+try:
+    raw_data = os.environ.get("TODO_CREATE_RESPONSE", "{}").strip()
+    if raw_data.startswith('"') and raw_data.endswith('"'):
+        raw_data = json.loads(raw_data)
+    data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+
+    print("✅ Task created successfully!")
+    print("----------------------------------------")
+    print(f"ID:         {data.get('id')}")
+    print(f"Task:       {data.get('task')}")
+    print(f"Tag:        {data.get('tag') or '[None]'}")
+    print(f"Owner:      {data.get('owner') or '[None]'}")
+    print(f"Created At: {data.get('created_at')}")
+    print("----------------------------------------")
+except Exception:
+    print("⚠️  Success, but failed to parse transaction confirmation streams.")
+EOF

@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Configuration
+API_URL="http://localhost:8000/api/todos"
+
+# Check if a task ID was provided as an argument
+if [ -z "$1" ]; then
+    echo "❌ Error: Missing task ID."
+    echo "Usage: ./mark_done <task_id>"
+    exit 1
+fi
+
+TODO_ID="$1"
+
+# Send the PUT request to the Flask server to mark it done
+response=$(curl -s -X PUT "$API_URL/$TODO_ID/done")
+
+# Error handling: Check if curl could talk to the server
+if [ $? -ne 0 ] || [ -z "$response" ]; then
+    echo "❌ Error: Failed to connect to the Flask server at $API_URL."
+    exit 1
+fi
+
+# Look for an explicit error payload from our API (e.g., Task not found)
+if echo "$response" | grep -q '"error"'; then
+    echo "❌ Server Error: $(echo "$response" | grep -o '"error":"[^"]*' | cut -d'"' -f4)"
+    exit 1
+fi
+
+# Export the raw text block so Python can parse the single-item JSON safely
+export TODO_UPDATE_DATA="$response"
+
+# Parse and print confirmation using simple inline Python
+python3 <<EOF
+import os, json
+try:
+    raw_data = os.environ.get("TODO_UPDATE_DATA", "{}").strip()
+
+    if raw_data.startswith('"') and raw_data.endswith('"'):
+      raw_data = json.loads(raw_data)
+
+    data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+
+    print("✅ Task marked as completed!")
+    print(f"----------------------------------------")
+    print(f"ID:         {data.get('id')}")
+    print(f"Status:     [DONE]")
+    print(f"Task:       {data.get('task')}")
+    print(f"Updated At: {data.get('updated_at')}")
+    print("----------------------------------------")
+except Exception:
+    print("⚠️ Success, but failed to parse updated server details.")
+EOF

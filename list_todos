@@ -1,0 +1,46 @@
+API_URL="http://localhost:8000/api/todos"
+
+# Send the GET request to the Flask server
+response=$(curl -s -X GET "$API_URL")
+
+# Error handling: Check if curl could reach the server
+if [ $? -ne 0 ] || [ -z "$response" ]; then
+    echo "❌ Error: Failed to connect to the Flask server at $API_URL."
+    exit 1
+fi
+
+# Export the raw text block so Python can process it safely out of system memory
+export TODO_RESPONSE_DATA="$response"
+
+# Let Python print the beautiful terminal table directly with expanded columns
+python3 -c '
+import os, json
+
+try:
+    raw_data = os.environ.get("TODO_RESPONSE_DATA", "[]")
+    data = json.loads(raw_data)
+
+    if not data:
+        print("ℹ️ Your todo list is completely empty!")
+        exit(0)
+
+    print("===========================================================================================")
+    print(f"{"ID":<4} | {"STATUS":<6} | {"TAG":<10} | {"OWNER":<12} | {"CREATED AT (UTC)":<19} | {"TASK"}")
+    print("===========================================================================================")
+
+    for item in data:
+        todo_id = item.get("id", "")
+        status = "[DONE]" if item.get("is_done") == 1 else "[PEND]"
+        tag = item.get("tag") or "-"
+        owner = item.get("owner") or "-"
+        created_at = item.get("created_at", "")
+        task = item.get("task", "")
+
+        # Format a beautifully padded line for the terminal table grid
+        print(f"{todo_id:<4} | {status:<6} | {tag:<10} | {owner:<12} | {created_at:<19} | {task}")
+
+    print("===========================================================================================")
+except Exception as e:
+    print("⚠️ API response was not valid JSON. Raw server output:")
+    print(raw_data)
+'

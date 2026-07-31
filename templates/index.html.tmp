@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Machine Inventory</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f4f6f9;
+      color: #333;
+      padding: 1.5rem;
+    }
+
+    h1   { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .sub { color: #666; font-size: 0.82rem; margin-bottom: 1.2rem; }
+
+    .summary { display: flex; gap: 0.8rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+    .badge {
+      padding: 0.4rem 1rem;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .badge-total    { background: #dce3f0; color: #2c3e6b; }
+    .badge-avail    { background: #d4edda; color: #155724; }
+    .badge-reserved { background: #fff3cd; color: #856404; }
+
+    /* ── search / filter bar ────────────────────────────────────────────── */
+    .filter-bar {
+      display: flex;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-bar label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #555;
+    }
+    .search-input {
+      font-size: 0.82rem;
+      padding: 0.4rem 0.7rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      width: 280px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus { border-color: #2c3e6b; box-shadow: 0 0 0 2px rgba(44,62,107,.15); }
+    .filter-bar select {
+      font-size: 0.78rem;
+      padding: 0.35rem 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .filter-bar button {
+      font-size: 0.78rem;
+      padding: 0.35rem 0.8rem;
+      background: #2c3e6b;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .filter-bar button:hover { background: #1a2a4a; }
+    .filter-bar button.clear-btn {
+      background: #999;
+    }
+    .filter-bar button.clear-btn:hover { background: #777; }
+    .filter-count {
+      font-size: 0.75rem;
+      color: #666;
+      margin-left: 0.5rem;
+    }
+    .filter-hint {
+      font-size: 0.7rem;
+      color: #999;
+      margin-bottom: 0.8rem;
+    }
+
+    /* ── table ──────────────────────────────────────────────────────────── */
+    .table-wrap {
+      overflow-x: auto;
+      max-width: 100%;
+    }
+
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1);
+      font-size: 0.75rem;
+    }
+    th {
+      background: #2c3e6b;
+      color: #fff;
+      padding: 0.55rem 0.7rem;
+      text-align: left;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      cursor: pointer;
+      user-select: none;
+    }
+    th:hover { background: #1a2a4a; }
+    th .sort-arrow { font-size: 0.6rem; margin-left: 0.3rem; }
+    td {
+      padding: 0.5rem 0.7rem;
+      border-bottom: 1px solid #eee;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f0f4ff; }
+    tr.hidden { display: none; }
+
+    /* highlight matched text */
+    mark {
+      background: #fff59d;
+      color: #333;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 12px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .pill-available { background: #d4edda; color: #155724; }
+    .pill-reserved  { background: #fff3cd; color: #856404; }
+
+    .empty { text-align: center; padding: 2rem; color: #999; font-size: 0.85rem; }
+
+    .refresh {
+      font-size: 0.78rem;
+      color: #2c3e6b;
+      text-decoration: none;
+      padding: 0.25rem 0.7rem;
+      border: 1px solid #2c3e6b;
+      border-radius: 4px;
+      margin-left: 1rem;
+    }
+    .refresh:hover { background: #2c3e6b; color: #fff; }
+
+    /* column group separators */
+    .col-sep { border-left: 2px solid #b0bec5; }
+
+    .footer {
+      margin-top: 0.8rem;
+      font-size: 0.75rem;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🖥️ Machine Inventory</h1>
+  <p class="sub">
+    Refreshed: <strong id="ts"></strong>
+    <a class="refresh" href="/">↻ Refresh</a>
+    <span style="margin-left:1rem; font-size:0.75rem; color:#888;">
+      Auto-refresh:
+      <select id="auto-refresh" style="font-size:0.75rem;">
+        <option value="0">Off</option>
+        <option value="30">30s</option>
+        <option value="60" selected>60s</option>
+        <option value="300">5m</option>
+      </select>
+    </span>
+  </p>
+
+  <div class="summary">
+    <span class="badge badge-total">Total: {{ total }}</span>
+    <span class="badge badge-avail">Available: {{ available }}</span>
+    <span class="badge badge-reserved">Reserved: {{ reserved }}</span>
+  </div>
+
+  <!-- ── search / filter bar ──────────────────────────────────────────── -->
+  <div class="filter-bar">
+    <label>🔍</label>
+    <input type="text" id="search-input" class="search-input"
+           placeholder="Search across all columns… (e.g. Turin, RHEL, alice, rack-2)"
+           autocomplete="off">
+    <select id="filter-status">
+      <option value="">All Status</option>
+      <option value="available">Available</option>
+      <option value="reserved">Reserved</option>
+    </select>
+    <button onclick="applyFilter()">Search</button>
+    <button class="clear-btn" onclick="clearFilter()">Clear</button>
+    <span id="filter-count" class="filter-count"></span>
+  </div>
+  <p class="filter-hint">
+    Tip: search works instantly as you type. Searches machine name, platform, IP, OS,
+    status, reserved by, site, rack, CPU, JIRA — every column.
+  </p>
+
+  <!-- ── main table ───────────────────────────────────────────────────── -->
+  <div class="table-wrap">
+    <table id="machine-table">
+      <thead>
+        <tr>
+          <!-- Identity -->
+          <th onclick="sortTable(0)">Machine <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(1)">Platform <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(2)">IP Address <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(3)">BMC <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(4)">OS <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(5)">Status <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(6)">Reserved By <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(7)">Description <span class="sort-arrow">⇅</span></th>
+          <!-- Inventory -->
+          <th class="col-sep" onclick="sortTable(8)">PO/SMS <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(9)">Program <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(10)">Socket <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(11)">Sys Config <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(12)">Make <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(13)">Model <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(14)">Category <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(15)">Asset Owner <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(16)">Serial <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(17)">MaaS Switch <span class="sort-arrow">⇅</span></th>
+          <!-- Infrastructure -->
+          <th class="col-sep" onclick="sortTable(18)">PDU IP <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(19)">PDU Port <span class="sort-arrow">⇅</span></th>
+          <!-- Location -->
+          <th class="col-sep" onclick="sortTable(20)">Site <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(21)">Lab <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(22)">Row <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(23)">Rack <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(24)">RU <span class="sort-arrow">⇅</span></th>
+          <!-- Hardware -->
+          <th class="col-sep" onclick="sortTable(25)">CPU <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(26)">Backplane <span class="sort-arrow">⇅</span></th>
+          <!-- Tracking -->
+          <th class="col-sep" onclick="sortTable(27)">JIRA <span class="sort-arrow">⇅</span></th>
+          <th onclick="sortTable(28)">Updated <span class="sort-arrow">⇅</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if machines %}
+          {% for m in machines %}
+          <tr>
+            <td><strong>{{ m.machine_name }}</strong></td>
+            <td>{{ m.platform_name or "" }}</td>
+            <td>{{ m.ip_address    or "" }}</td>
+            <td>{{ m.bmc_name      or "-" }}</td>
+            <td>{{ m.os            or "" }}</td>
+            <td>
+              <span class="pill pill-{{ m.status }}">{{ m.status }}</span>
+            </td>
+            <td>{{ m.reserved_by   or "" }}</td>
+            <td>{{ m.description   or "" }}</td>
+            <td class="col-sep">{{ m.po_sms         or "" }}</td>
+            <td>{{ m.program       or "" }}</td>
+            <td>{{ m.socket        or "" }}</td>
+            <td>{{ m.system_config or "" }}</td>
+            <td>{{ m.make          or "" }}</td>
+            <td>{{ m.model         or "" }}</td>
+            <td>{{ m.category      or "" }}</td>
+            <td>{{ m.asset_owner   or "" }}</td>
+            <td>{{ m.serial        or "" }}</td>
+            <td>{{ m.maas_switch   or "" }}</td>
+            <td class="col-sep">{{ m.pdu_ip         or "" }}</td>
+            <td>{{ m.pdu_port      or "" }}</td>
+            <td class="col-sep">{{ m.site           or "" }}</td>
+            <td>{{ m.lab           or "" }}</td>
+            <td>{{ m.row_location  or "" }}</td>
+            <td>{{ m.rack          or "" }}</td>
+            <td>{{ m.ru            or "" }}</td>
+            <td class="col-sep">{{ m.cpu            or "" }}</td>
+            <td>{{ m.backplane     or "" }}</td>
+            <td class="col-sep">{{ m.jira           or "" }}</td>
+            <td>{{ m.updated_at }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td class="empty" colspan="29">No machines registered yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    <span id="visible-count"></span>
+  </div>
+
+  <!-- ── JavaScript ───────────────────────────────────────────────────── -->
+  <script>
+    // ── timestamp ────────────────────────────────────────────────────────
+    document.getElementById("ts").textContent = new Date().toLocaleString();
+
+    // ── auto-refresh ─────────────────────────────────────────────────────
+    let refreshTimer = null;
+    const refreshSelect = document.getElementById("auto-refresh");
+
+    function setAutoRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      const secs = parseInt(refreshSelect.value);
+      if (secs > 0) {
+        refreshTimer = setInterval(() => location.reload(), secs * 1000);
+      }
+    }
+    refreshSelect.addEventListener("change", setAutoRefresh);
+    setAutoRefresh();
+
+    // ── store original cell text for each row (before any highlighting) ──
+    const tableBody = document.querySelector("#machine-table tbody");
+    const allRows   = Array.from(tableBody.querySelectorAll("tr")).filter(
+      r => !r.querySelector(".empty")
+    );
+
+    // save original text content per row per cell
+    const originalData = allRows.map(row => {
+      return Array.from(row.cells).map(cell => ({
+        text: cell.textContent,
+        html: cell.innerHTML
+      }));
+    });
+
+    // ── search / filter ──────────────────────────────────────────────────
+    const searchInput   = document.getElementById("search-input");
+    const filterStatus  = document.getElementById("filter-status");
+    const filterCount   = document.getElementById("filter-count");
+    const visibleCount  = document.getElementById("visible-count");
+
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function highlightText(text, searchTerm) {
+      if (!searchTerm) return text;
+      const regex = new RegExp('(' + escapeRegex(searchTerm) + ')', 'gi');
+      return text.replace(regex, '<mark>$1</mark>');
+    }
+
+    function applyFilter() {
+      const searchTerm = searchInput.value.toLowerCase().trim();
+      const status     = filterStatus.value.toLowerCase();
+      let shown = 0;
+
+      allRows.forEach((row, rowIndex) => {
+        const cellData   = originalData[rowIndex];
+        const allText    = cellData.map(c => c.text.toLowerCase()).join(" ");
+        // status is in column 5
+        const rowStatus  = cellData[5].text.toLowerCase().trim();
+
+        const textMatch   = !searchTerm || allText.includes(searchTerm);
+        const statusMatch = !status     || rowStatus === status;
+
+        if (textMatch && statusMatch) {
+          row.classList.remove("hidden");
+          shown++;
+
+          // highlight matches in each cell
+          if (searchTerm) {
+            Array.from(row.cells).forEach((cell, cellIndex) => {
+              const original = cellData[cellIndex];
+
+              // skip the status pill column — don't mess with its HTML
+              if (cellIndex === 5) {
+                cell.innerHTML = original.html;
+                return;
+              }
+
+              const cellText = original.text;
+              if (cellText.toLowerCase().includes(searchTerm)) {
+                cell.innerHTML = highlightText(cellText, searchTerm);
+              } else {
+                cell.innerHTML = original.html;
+              }
+            });
+          } else {
+            // no search term — restore original HTML
+            Array.from(row.cells).forEach((cell, cellIndex) => {
+              cell.innerHTML = originalData[rowIndex][cellIndex].html;
+            });
+          }
+        } else {
+          row.classList.add("hidden");
+          // restore original HTML for hidden rows too
+          Array.from(row.cells).forEach((cell, cellIndex) => {
+            cell.innerHTML = originalData[rowIndex][cellIndex].html;
+          });
+        }
+      });
+
+      const total = allRows.length;
+      if (searchTerm || status) {
+        filterCount.textContent = `Showing ${shown} of ${total}`;
+      } else {
+        filterCount.textContent = "";
+      }
+      visibleCount.textContent = `${shown} machine(s) displayed`;
+    }
+
+    function clearFilter() {
+      searchInput.value    = "";
+      filterStatus.value   = "";
+      applyFilter();
+      searchInput.focus();
+    }
+
+    // ── live search — filter as you type ─────────────────────────────────
+    searchInput.addEventListener("input", applyFilter);
+    filterStatus.addEventListener("change", applyFilter);
+
+    // also respond to Enter key
+    searchInput.addEventListener("keyup", function(e) {
+      if (e.key === "Escape") clearFilter();
+    });
+
+    // initial count
+    applyFilter();
+
+    // ── column sorting ───────────────────────────────────────────────────
+    let sortCol = -1;
+    let sortAsc = true;
+
+    function sortTable(colIndex) {
+      if (sortCol === colIndex) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = colIndex;
+        sortAsc = true;
+      }
+
+      // sort the allRows array and their corresponding originalData together
+      const paired = allRows.map((row, i) => ({ row, data: originalData[i] }));
+
+      paired.sort((a, b) => {
+        const aText = a.data[colIndex].text.trim().toLowerCase();
+        const bText = b.data[colIndex].text.trim().toLowerCase();
+
+        // try numeric sort
+        const aNum = parseFloat(aText);
+        const bNum = parseFloat(bText);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return sortAsc ? aNum - bNum : bNum - aNum;
+        }
+
+        // empty values always sort to the end
+        if (!aText && bText) return 1;
+        if (aText && !bText) return -1;
+
+        if (aText < bText) return sortAsc ? -1 : 1;
+        if (aText > bText) return sortAsc ? 1 : -1;
+        return 0;
+      });
+
+      // re-order DOM and originalData
+      paired.forEach((p, i) => {
+        tableBody.appendChild(p.row);
+        originalData[i] = p.data;
+        allRows[i]      = p.row;
+      });
+
+      // re-apply filter to maintain highlights and visibility
+      applyFilter();
+
+      // update sort arrows
+      const ths = document.querySelectorAll("#machine-table th .sort-arrow");
+      ths.forEach((arrow, i) => {
+        arrow.textContent = (i === colIndex) ? (sortAsc ? "▲" : "▼") : "⇅";
+      });
+    }
+
+    // ── keyboard shortcut: Ctrl+F or / focuses the search box ────────────
+    document.addEventListener("keydown", function(e) {
+      if ((e.ctrlKey && e.key === "f") || (e.key === "/" && document.activeElement.tagName !== "INPUT")) {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+      }
+    });
+  </script>
+</body>
+</html>

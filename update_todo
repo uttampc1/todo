@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# Configuration: Adjust if your Flask server runs on a different host or port
+API_URL="http://localhost:8000/api/todos"
+
+usage() {
+    echo "Usage: ./update_todo.sh <task_id> [options]"
+    echo "Options:"
+    echo "  -m \"new task text\" Update the description text"
+    echo "  -t \"new tag\"       Update the tag attribute"
+    echo "  -o \"new owner\"     Update the owner attribute"
+    echo "Example: ./update_todo.sh 1 -m \"Buy fresh milk\" -t \"urgent\""
+    exit 1
+}
+
+# Ensure at least an ID and one flag argument are present
+if [ -z "$1" ] || [ -z "$2" ]; then
+    usage
+fi
+
+TODO_ID="$1"
+shift
+
+TASK_VAL=""
+TAG_VAL=""
+OWNER_VAL=""
+HAS_TASK=false
+HAS_TAG=false
+HAS_OWNER=false
+
+# Parse terminal option switches natively (added m: for message/task)
+while getopts "m:t:o:" opt; do
+    case "$opt" in
+        m) TASK_VAL="$OPTARG"; HAS_TASK=true ;;
+        t) TAG_VAL="$OPTARG"; HAS_TAG=true ;;
+        o) OWNER_VAL="$OPTARG"; HAS_OWNER=true ;;
+        *) usage ;;
+    esac
+done
+
+# Build dynamic JSON payload on the fly based on flags passed
+JSON_PAYLOAD="{"
+FIRST=true
+
+if [ "$HAS_TASK" = true ]; then
+    JSON_PAYLOAD="$JSON_PAYLOAD\"task\": \"$TASK_VAL\""
+    FIRST=false
+fi
+
+if [ "$HAS_TAG" = true ]; then
+    if [ "$FIRST" = false ]; then JSON_PAYLOAD="$JSON_PAYLOAD, "; fi
+    JSON_PAYLOAD="$JSON_PAYLOAD\"tag\": \"$TAG_VAL\""
+    FIRST=false
+fi
+
+if [ "$HAS_OWNER" = true ]; then
+    if [ "$FIRST" = false ]; then JSON_PAYLOAD="$JSON_PAYLOAD, "; fi
+    JSON_PAYLOAD="$JSON_PAYLOAD\"owner\": \"$OWNER_VAL\""
+fi
+JSON_PAYLOAD="$JSON_PAYLOAD}"
+
+# Send the request to your Flask service app endpoint
+response=$(curl -s -X PUT "$API_URL/$TODO_ID" \
+     -H "Content-Type: application/json" \
+     -d "$JSON_PAYLOAD")
+
+if [ $? -ne 0 ] || [ -z "$response" ]; then
+    echo "❌ Error: Failed to connect to the Flask server."
+    exit 1
+fi
+
+export TODO_UPDATE_SINGLE_DATA="$response"
+
+# Run confirmation output
+python3 <<EOF
+import os, json
+try:
+    raw_data = os.environ.get("TODO_UPDATE_SINGLE_DATA", "{}").strip()
+    
+    # Clean up double serialization wrappers if they exist
+    if raw_data.startswith('"') and raw_data.endswith('"'):
+        raw_data = json.loads(raw_data)
+        
+    data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    
+    if "error" in data:
+        print(f"❌ Server Error: {data.get('error')}")
+    else:
+        # Extract metadata metrics from the new root layout wrapper
+        print(f"✨ {data.get('message', 'Task updated.')}")
+        
+        updated_fields = data.get('fields_updated', [])
+        if updated_fields:
+            print(f"Modified properties: {', '.join(updated_fields)}")
+        else:
+            print("No values were altered.")
+            
+        if "renamed_to" in data:
+            print(f"Renamed to:          \"{data.get('renamed_to')}\"")
+            
+        # Drill down into the nested 'todo' block to find current values
+        todo = data.get('todo', {})
+        print("----------------------------------------")
+        print(f"ID:    {todo.get('id')}")
+        print(f"Task:  {todo.get('task')}")
+        print(f"Tag:   {todo.get('tag') or '[None]'}")
+        print(f"Owner: {todo.get('owner') or '[None]'}")
+        print("----------------------------------------")
+except Exception as e:
+    print("⚠️  Success, but failed to parse updated server details.")
+EOF
